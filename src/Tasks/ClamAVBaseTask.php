@@ -34,10 +34,11 @@ class ClamAVBaseTask extends BuildTask
     public function run($request, $job = null)
     {
         // Check if online before starting
+        /** @var ClamAV */
         $this->clamAV = Injector::inst()->get(ClamAV::class);
         $this->job = $job;
-        $version = $this->clamAV->version();
-        if ($version === ClamAV::OFFLINE) {
+        $ping = $this->clamAV->ping();
+        if ($ping === ClamAV::OFFLINE) {
             $this->log('ClamAV daemon is offline. Cannot scan.');
 
             return false;

@@ -16,19 +16,38 @@ use SilverStripe\ORM\ArrayList;
 use SilverStripe\ORM\DataList;
 use SilverStripe\ORM\DataObject;
 use Symbiote\SteamedClams\Model\ClamAVScan;
-use SilverStripe\Assets\Flysystem\ProtectedAssetAdapter;
+
+use \ClamdBase;
+use \ClamdPipe;
+use \ClamdException;
+use \ClamdSocketException;
+
+use \Exception;
+
 
 class ClamAV
 {
     use Injectable;
     use Configurable;
 
+    /**
+     * @var string
+     */
     const MODULE_DIR = 'steamedclams';
 
     /**
      * If ClamAV daemon can't be connected to or is offline.
+     *
+     * @var bool
      */
     const OFFLINE = false;
+
+    /**
+     * If the scan is using the Clamd socket or clamdscan binary
+     *
+     * @var bool
+     */
+    const USE_SOCKET = true;
 
     /**
      * Configure this to ignore `File` records created before the date
@@ -45,6 +64,8 @@ class ClamAV
     /**
      * If enabled, if ClamAV daemon isn't running or isn't installed
      * the file will be denied as if it has a virus.
+     *
+     * @var bool
      */
     private static $deny_on_failure = false;
 
@@ -58,15 +79,16 @@ class ClamAV
         // Path to a local socket file the daemon will listen on.
         // Default: disabled (must be specified by a user)
         'LocalSocket' => '/var/run/clamav/clamd.ctl',
+        'LocalBinary' => '/usr/bin/clamdscan'
     ];
 
     /**
-     * @var \ClamdBase
+     * @var ClamdBase|ClamAVScanner|null
      */
     protected $clamd_instance = null;
 
     /**
-     * @var \ClamdException
+     * @var ClamdException|Exception|null
      */
     protected $last_exception = null;
 
@@ -129,17 +151,43 @@ class ClamAV
         return $result;
     }
 
+    public function verifyClamAVConfig()
+    {
+        $useBinary = Config::inst()->get(__CLASS__, 'use_clamscan');
+        $clamdConf = Config::inst()->get(__CLASS__, 'clamd');
+
+        $localSocket = isset($clamdConf['LocalSocket']) ? $clamdConf['LocalSocket'] : '';
+        $localBinary = isset($clamdConf['LocalBinary']) ? $clamdConf['LocalBinary'] : '';
+
+        switch (true) {
+            case !$useBinary && !$localSocket: {
+                // need Local Socket set
+                throw new LogicException(
+                    'When using LocalSocket, empty value for "clamd.LocalSocket" config not allowed.'
+                );
+            }
+            break;
+
+            case $useBinary && !$localBinary: {
+                // Need Local Binary set
+                throw new LogicException(
+                    'When using LocalBinary, empty value for "clamd.LocalBinary" config not allowed.'
+                );
+            }
+            break;
+
+            default: {
+                return true;
+            }
+        }
+    }
+
     /**
      * @return ClamAVScan|null
      */
     public function scanFileForVirus($filepath)
     {
-        $clamdConf = Config::inst()->get(__CLASS__, 'clamd');
-        $localSocket = isset($clamdConf['LocalSocket']) ? $clamdConf['LocalSocket'] : '';
-
-        if (!$localSocket) {
-            throw new LogicException('Empty value for "clamd.LocalSocket" config not allowed.');
-        }
+        $this->verifyClamAVConfig();
 
         $scanResult = $this->fileScan($filepath);
 
@@ -184,7 +232,10 @@ class ClamAV
         try {
             $clamd = $this->getClamd();
             $scanResult = $clamd->fileScan($filepath);
-        } catch (\ClamdSocketException $e) {
+        } catch (ClamdSocketException $e) {
+            $this->setLastExceptionAndLog($e);
+            $scanResult = self::OFFLINE;
+        } catch (Exception $e) {
             $this->setLastExceptionAndLog($e);
             $scanResult = self::OFFLINE;
         }
@@ -195,7 +246,7 @@ class ClamAV
     /**
      * Return underlying Clamd implementation.
      *
-     * @return \ClamdBase
+     * @return ClamdBase|ClamAVScanner
      */
     protected function getClamd()
     {
@@ -203,14 +254,54 @@ class ClamAV
             return $this->clamd_instance;
         }
 
-        $result = null;
-        if (class_exists(Injector::class)) {
-            $result = Injector::inst()->create(\ClamdPipe::class);
-        } else {
-            $result = new \ClamdPipe;
+        $useBinary = Config::inst()->get(__CLASS__, 'use_clamscan');
+
+        if ($useBinary) {
+            return $this->clamd_instance = $this->getScanner();
         }
 
-        return $this->clamd_instance = $result;
+        return $this->clamd_instance = $this->getClamdPipe();
+    }
+
+    /**
+     * Return ClamAV Scanner class
+     *
+     * @return ClamAVScanner
+     */
+    protected function getScanner()
+    {
+        $clamdConf = Config::inst()->get(__CLASS__, 'clamd');
+        $localBinary = isset($clamdConf['LocalBinary']) ? $clamdConf['LocalBinary'] : '';
+
+        $result = null;
+
+        if (class_exists(Injector::class)) {
+            $result = Injector::inst()->create(ClamAVScanner::class, $localBinary);
+        } else {
+            $result = new ClamAVScanner($localBinary);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Return ClamdBase class
+     *
+     * @return ClamdBase
+     */
+    protected function getClamdPipe()
+    {
+        $clamdConf = Config::inst()->get(__CLASS__, 'clamd');
+        $localSocket = isset($clamdConf['LocalSocket']) ? $clamdConf['LocalSocket'] : '';
+
+        $result = null;
+        if (class_exists(Injector::class)) {
+            $result = Injector::inst()->create(ClamdPipe::class, $localSocket);
+        } else {
+            $result = new ClamdPipe($localSocket);
+        }
+
+        return $result;
     }
 
     /**
@@ -353,14 +444,36 @@ class ClamAV
         if ($this->_cache_isOffline !== null) {
             return $this->_cache_isOffline;
         }
-        $result = $this->version();
+        $result = $this->ping();
         $result = ($result === ClamAV::OFFLINE);
 
         return $this->_cache_isOffline = $result;
     }
 
     /**
-     * @return string
+     * Sends a ping to the clamd service returning a bool
+     *
+     * @return bool
+     */
+    public function ping()
+    {
+        try {
+            $clamd = $this->getClamd();
+
+            $ping = $clamd->ping();
+        } catch (ClamdSocketException $e) {
+            $this->setLastExceptionAndLog($e);
+            $ping = self::OFFLINE;
+        } catch (Exception $e) {
+            $this->setLastExceptionAndLog($e);
+            $ping = self::OFFLINE;
+        }
+
+        return $ping;
+    }
+
+    /**
+     * @return bool|string
      */
     public function version()
     {
@@ -370,7 +483,10 @@ class ClamAV
             $clamd = $this->getClamd();
 
             $version = $clamd->version();
-        } catch (\ClamdSocketException $e) {
+        } catch (ClamdSocketException $e) {
+            $this->setLastExceptionAndLog($e);
+            $version = self::OFFLINE;
+        } catch (Exception $e) {
             $this->setLastExceptionAndLog($e);
             $version = self::OFFLINE;
         }
@@ -382,7 +498,7 @@ class ClamAV
      * Get the last exception caught by this.
      * Allows you to report the exact error to an admin/developer user in the CMS.
      *
-     * @return \ClamdException
+     * @return ClamdException|Exception|null
      */
     public function getLastException()
     {

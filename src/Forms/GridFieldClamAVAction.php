@@ -17,7 +17,7 @@ use Symbiote\SteamedClams\Model\ClamAVScan;
 class GridFieldClamAVAction implements GridField_ColumnProvider, GridField_ActionProvider
 {
     /**
-     * @var ClamAV
+     * @var ClamAV|null
      */
     protected $clamAV = null;
 
@@ -109,7 +109,7 @@ class GridFieldClamAVAction implements GridField_ColumnProvider, GridField_Actio
                 return $fieldList->forTemplate();
                 break;
 
-            /*case 'clamav_ignore':
+                /*case 'clamav_ignore':
                 $state = $record->State;
                 if ($state !== ClamAVScan::STATE_INFECTED && $state !== ClamAVScan::STATE_UNSCANNED) {
                     return;

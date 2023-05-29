@@ -44,7 +44,7 @@ class ClamAVAdmin extends ModelAdmin
     /**
      * @var string
      */
-    private static $menu_icon = 'vendor/symbiote/silverstripe-steamedclams/client/images/clamav_icon.png';
+    private static $menu_icon = 'symbiote/silverstripe-steamedclams:client/images/clamav_icon.png';
 
     /**
      * @var array
@@ -99,9 +99,10 @@ class ClamAVAdmin extends ModelAdmin
                 $gridConfig->addComponent(Injector::inst()->create(GridFieldClamAVAction::class));
             }
 
+            /** @var ClamAV */
             $clamAV = Injector::inst()->get(ClamAV::class);
 
-            $version = $clamAV->version();
+            $version = $clamAV->ping();
             $reason = '';
             if ($version === ClamAV::OFFLINE) {
                 $version = '<p style="margin-bottom: 20px"><strong style="color: #C00;">OFFLINE</strong></p>';
@@ -111,7 +112,7 @@ class ClamAVAdmin extends ModelAdmin
                     $reason = 'Reason: ' . $exception->getMessage();
                 }
             } else {
-                $version = '<p style="margin-bottom: 20px"><strong style="color: #18BA18;">ONLINE</strong> (' . $version . ')</p>';
+                $version = '<p style="margin-bottom: 20px"><strong style="color: #18BA18;">ONLINE</strong> (' . $clamAV->version() . ')</p>';
             }
 
             $versionField = LiteralField::create('ClamAV_Version', $version);
