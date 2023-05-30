@@ -4,19 +4,29 @@ Using ClamAV, this module scans files as their uploaded and denies uploading if 
 that the file needs to be scanned, wherein you can either manually scan via the CMS once the daemon is back online, run a
 nightly cron that scans the files or if you have queuedjobs installed, it will automatically scan missed files at nightly.
 
+# Screenshots
+
+![ModelAdmin](docs/images/admin-dashboard.png)
+![UploadField](https://cloud.githubusercontent.com/assets/3859574/20907335/b8459310-bba1-11e6-86d2-3a5f6cc6e959.jpg)
+
 # Composer Install
 
 ```
 composer require symbiote/silverstripe-steamedclams:~2.0
 ```
 
-# Screenshots
+# Requirements
 
-![ModelAdmin](https://cloud.githubusercontent.com/assets/3859574/20911711/000abbd2-bbbe-11e6-9b93-f0490cc055f7.png)
+- Silverstripe 4+
 
-![UploadField](https://cloud.githubusercontent.com/assets/3859574/20907335/b8459310-bba1-11e6-86d2-3a5f6cc6e959.jpg)
+# Documentation
+
+- [Advanced Usage](docs/en/advanced-usage.md)
+
 
 # Quick Start
+
+## Install and configure ClamAV
 
 1) Install ClamAV in Unix/Linux.
 ```
@@ -58,10 +68,7 @@ Symbiote\SteamedClams\ClamAV:
     LocalSocket: '/var/run/clamav/clamd.ctl'
 ```
 
-5) After running dev/build?flush, all files should scan for viruses automatically during uploading / validation. 
-If you are using 
-
-6) To check to see if it's running properly, it should show that it's ONLINE at: http://{mysite.com}/admin/clamav
+ClamAV can be configured to run on a separate server, see [advanced usage](docs/en/advanced-usage.md) for setup options.
 
 # Configuration
 
@@ -70,9 +77,14 @@ Symbiote\SteamedClams\ClamAV:
   # Make this the same as your clamd.conf settings
   clamd:
     LocalSocket: '/var/run/clamav/clamd.ctl'
+    # Make sure the clamd.conf settings are correct
+    # If using a remote server be sure to have the TCPSocket and TCPAddr set
+    LocalBinary: '/usr/bin/clamdscan'
+  # Set to true to use the LocalBinary path for scans
+  use_clamscan: false
   # If true and the ClamAV daemon isn't running or isn't installed the file will be denied as if it has a virus.
   deny_on_failure: false
-  # For configuring on existing site builds and ignoring the scanning of pre-module install `File` records. 
+  # For configuring on existing site builds and ignoring the scanning of pre-module install `File` records.
   initial_scan_ignore_before_datetime: '1970-12-25 00:00:00'
 ```
 
@@ -137,10 +149,9 @@ ClamAVEmulator::config()->mode = ClamAVEmulator::MODE_OFFLINE;
 ```
 
 # Supports
-- Silverstripe 4.0 and up 
+- Silverstripe 4.0 and up
 - [Versioned Files](https://github.com/symbiote/silverstripe-versionedfiles)
 - [CDN Content](https://github.com/symbiote/silverstripe-cdncontent)
-- For Silverstripe 3.2 and up (3.1 *should* work, create an issue if you determine otherwise) use 1.0
 
 # Credits
 [Barakat S](https://github.com/FileZ/php-clamd) for clamd PHP interface
